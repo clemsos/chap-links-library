@@ -186,6 +186,8 @@ links.Timeline = function(container) {
         'zoomMax': 1000 * 60 * 60 * 24 * 365 * 10000, // milliseconds
 
         'moveable': true,
+        'moveable': false,
+        'smoothable': true,
         'zoomable': true,
         'selectable': true,
         'editable': false,
@@ -196,7 +198,7 @@ links.Timeline = function(container) {
         'showCustomTime': false, // show a blue, draggable bar displaying a custom time    
         'showMajorLabels': true,
         'showMinorLabels': true,
-        'showNavigation': false,
+        'showNavigation': true,
         'showButtonNew': false,
         'groupsOnRight': false,
         'axisOnTop': false,
@@ -893,6 +895,12 @@ links.Timeline.prototype.repaintFrame = function() {
         if (!params.onDblClick) {
             params.onDblClick = function (event) {me.onDblClick(event);};
             links.Timeline.addEventListener(dom.content, "dblclick", params.onDblClick);
+        }
+        
+        if (!params.onMouseMove && options.smoothable) {
+            params.onMouseMove = function (event) {me.onMouseMove(event);};
+            console.log(params)
+            links.Timeline.addEventListener(dom.content, "mousemove", params.onMouseMove);
         }
 
         needsReflow = true;
@@ -2265,7 +2273,7 @@ links.Timeline.prototype.repaintNavigation = function () {
                 navBar.appendChild(navBar.zoomOutButton);
             }
 
-            if (options.moveable) {
+            if (options.moveable || options.smoothable) {
                 // create a move left button
                 navBar.moveLeftButton = document.createElement("DIV");
                 navBar.moveLeftButton.className = "timeline-navigation-move-left";
@@ -2591,6 +2599,7 @@ links.Timeline.prototype.onTouchEnd = function(event) {
  */
 links.Timeline.prototype.onMouseDown = function(event) {
     event = event || window.event;
+    // console.log(this)
 
     var params = this.eventParams,
         options = this.options,
@@ -2609,6 +2618,8 @@ links.Timeline.prototype.onMouseDown = function(event) {
     params.frameTop = links.Timeline.getAbsoluteTop(this.dom.content);
     params.previousLeft = 0;
     params.previousOffset = 0;
+
+    // calculate change in mouse position
 
     params.moved = false;
     params.start = new Date(this.start.valueOf());
@@ -2633,6 +2644,51 @@ links.Timeline.prototype.onMouseDown = function(event) {
         undefined;
 
     params.addItem = (options.editable && event.ctrlKey);
+
+    
+    if(options.smoothable) {
+        
+        var x = params.mouseX - params.frameLeft;
+        // start the creation of an event 
+        
+        this.xclick = this.screenToTime(x);
+        if (options.snapEvents) this.step.snap(this.xclick);
+        
+        this.trigger('click');
+
+    /*
+            // start creating an event on the first click
+
+        } else {
+            // continue event creation on the second click
+            var y = params.mouseY - params.frameTop
+
+            var xstart = this.xstart;
+            var xend = this.screenToTime(x);
+            if (options.snapEvents) this.step.snap(xend);
+            var content = options.NEW;
+            
+            // finalize event creation
+            var group = this.getGroupFromHeight(y);
+            this.addItem({
+            'start': xstart,
+            'end': xend,
+            'content': content,
+            'group': this.getGroupName(group)
+            });
+
+            params.itemIndex = (this.items.length - 1);
+            this.selectItem(params.itemIndex);
+            params.itemDragRight = true;
+
+            // delete the tmp var
+            delete this.xstart;
+
+        }
+    */
+
+    } 
+
     if (params.addItem) {
         // create a new event at the current mouse position
         var x = params.mouseX - params.frameLeft;
@@ -2699,7 +2755,8 @@ links.Timeline.prototype.onMouseMove = function (event) {
     var params = this.eventParams,
         size = this.size,
         dom = this.dom,
-        options = this.options;
+        options = this.options
+        timeline = this;
 
     // calculate change in mouse position
     var mouseX = links.Timeline.getPageX(event);
@@ -2718,7 +2775,7 @@ links.Timeline.prototype.onMouseMove = function (event) {
     // if mouse movement is big enough, register it as a "moved" event
     if (Math.abs(diffX) >= 1) {
         params.moved = true;
-    }
+    } 
 
     if (params.customTime) {
         var x = this.timeToScreen(params.customTime);
@@ -2807,6 +2864,7 @@ links.Timeline.prototype.onMouseMove = function (event) {
     else if (options.moveable) {
         var interval = (params.end.valueOf() - params.start.valueOf());
         var diffMillisecs = Math.round((-diffX) / size.contentWidth * interval);
+        console.log(diffMillisecs)
         var newStart = new Date(params.start.valueOf() + diffMillisecs);
         var newEnd = new Date(params.end.valueOf() + diffMillisecs);
         this.applyRange(newStart, newEnd);
@@ -2828,22 +2886,47 @@ links.Timeline.prototype.onMouseMove = function (event) {
         var previousOffset = params.previousOffset || 0;
         var frameOffset = previousOffset + (currentLeft - previousLeft);
         var frameLeft = -diffMillisecs / interval * size.contentWidth + frameOffset;
+        console.log(currentLeft)
 
         dom.items.frame.style.left = (frameLeft) + "px";
 
         // read the left again from DOM (IE8- rounds the value)
         params.previousOffset = frameOffset;
         params.previousLeft = parseFloat(dom.items.frame.style.left) || frameLeft;
-
+        console.log(previousLeft)
         this.repaintCurrentTime();
         this.repaintCustomTime();
         this.repaintAxis();
 
         // fire a rangechange event
         this.trigger('rangechange');
+
+    }
+    else if (options.smoothable) {
+
+        var maxspeed=0.3, // TODO implement max speed
+        rate = 0,
+        left = false,
+        center =false;
+
+        // is mouse on center, left or right side?
+        if (mouseX < (this.size.contentWidth/8)*5 && mouseX > (this.size.contentWidth/8)*3) center = true;
+        else if (mouseX < (this.size.contentWidth ) /2 ) left = true;
+        else left = false;
+
+        var w = this.size.contentWidth;
+        
+        // calculate rate
+        if (left) rate = -(mouseX)/w;
+        else rate = (w - mouseX)/w;
+        rate = rate*0.005;
+        
+        //move timeline
+        if (!center) timeline.move(rate);
+
     }
 
-    links.Timeline.preventDefault(event);
+    if (!options.smoothable) links.Timeline.preventDefault(event);
 };
 
 
@@ -3043,7 +3126,6 @@ links.Timeline.prototype.onDblClick = function (event) {
 
     links.Timeline.preventDefault(event);
 };
-
 
 /**
  * Event handler for mouse wheel event, used to zoom the timeline
@@ -4990,6 +5072,7 @@ links.Timeline.prototype.collision = function(item1, item2, margin) {
 links.Timeline.prototype.trigger = function (event) {
     // built up properties
     var properties = null;
+    // console.log(event)
     switch (event) {
         case 'rangechange':
         case 'rangechanged':
@@ -4998,7 +5081,6 @@ links.Timeline.prototype.trigger = function (event) {
                 'end': new Date(this.end.valueOf())
             };
             break;
-
         case 'timechange':
         case 'timechanged':
             properties = {
